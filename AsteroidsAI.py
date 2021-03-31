@@ -3,7 +3,6 @@ import os
 import neat
 import math
 import random
-pygame.font.init()
 
 WIDTH, HEIGHT = (1000, 1000)
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -19,15 +18,15 @@ GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
 
-SHIP_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Ship.png')), (SHIPWIDTH, SHIPHEIGHT))
+SHIP_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Ship.png')), (SHIPWIDTH, SHIPHEIGHT)).convert_alpha()
 
-BULLET_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'bullet.png')), (BULLETWIDTH, BULLETHEIGHT))
+BULLET_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'bullet.png')), (BULLETWIDTH, BULLETHEIGHT)).convert_alpha()
 
-ASTEROID_IMGS = [pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid1.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT)), 
-                pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid2.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT)),
-                pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid3.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT))]
+ASTEROID_IMGS = [pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid1.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT)).convert_alpha(), 
+                pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid2.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT)).convert_alpha(),
+                pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Asteroid3.png')), (ASTEROIDWIDTH, ASTEROIDHEIGHT)).convert_alpha()]
 
-LINE_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Line.png')), (LINEWIDTH, LINEHEIGHT))
+LINE_IMG = pygame.transform.scale(pygame.image.load(os.path.join('Assets', 'Line.png')), (LINEWIDTH, LINEHEIGHT)).convert_alpha()
 
 class Ship:
     ROT_VEL = 3
@@ -47,6 +46,7 @@ class Ship:
         self.reset = False
         self.moving = False
         self.ship_tag = ship_tag
+        self.cooldown = 100
     
     def move_foraward(self):
         if self.reset == True:
@@ -92,22 +92,23 @@ class Ship:
             self.tilt = 0
         self.last_turn = 1
         self.turn_tick_count = 1
-        self.detect_border()
 
     def detect_border(self):
-        if self.x <= -1:
-            self.x = 1001
-        elif self.x >= 1001:
-            self.x = -1
-        elif self.y <= -1:
-            self.y = 1001
-        elif self.y >= 1001:
-            self.y = -1
+        if self.x <= 0:
+            self.x = 1000
+        elif self.x >= 1000:
+            self.x = 0
+        elif self.y <= -15:
+            self.y = 1015
+        elif self.y >= 1015:
+            self.y = -15
 
     def draw(self):
         rotated_image = pygame.transform.rotate(self.img, self.tilt)
         new_rect = rotated_image.get_rect(center=self.img.get_rect(topleft=(self.x,self.y)).center)
         WIN.blit(rotated_image, new_rect.topleft)
+        self.update_cooldown()
+        self.detect_border()
 
     def rad_to_offset(self, radians, offset):
         x = math.cos(radians) * offset
@@ -117,6 +118,13 @@ class Ship:
 
     def get_mask(self):
         return pygame.mask.from_surface(self.img)
+
+    def update_cooldown(self):
+        if self.cooldown < 10:
+            self.cooldown += 1
+        else:
+            self.cooldown = 10
+        
 
 class Bullet(Ship):
     VELOCITY = 10
@@ -209,7 +217,7 @@ class Asteroid:
                 pass
             else:
                 turn_direction = random.randint(self.direction - 45, self.direction + 45)
-                asteroids.append(Asteroid(self.x, self.y, turn_direction, self.size))
+                asteroids.append(Asteroid(self.x, self.y, turn_direction, self.size, self.ship_tag))
 
     def detect_border(self):
         if self.x <= -25:
@@ -252,11 +260,30 @@ class Asteroid:
             offset = (int(self.x) - int(bullet.x), int(self.y) - int(bullet.y))
 
             hit = bullet_mask.overlap(asteroid_mask, offset)
+            
 
             if hit:
-                bullets.pop(x)
-                return True
+                if self.ship_tag == bullet.ship_tag:
+                    bullets.pop(x)
+                    return bullet.ship_tag
+
+        return -1
     
+    def detect_parent_ship(self, ships, asteroids):
+        ship_tags = []
+        asteroid_tags = []
+        new_asteroids = []
+        for ship in ships:
+            ship_tags.append(ship.ship_tag)
+        for tag in ship_tags:
+            for asteroid in asteroids:
+                if tag == asteroid.ship_tag:
+                    new_asteroids.append(asteroid)
+        return new_asteroids
+
+
+
+
 def draw_window(WIN, ships, bullet, asteroid):
     WIN.fill(BLACK)
     if len(bullet) >= 1:
@@ -273,6 +300,7 @@ def draw_window(WIN, ships, bullet, asteroid):
 
     for ship in ships:  
         ship.draw()
+
     pygame.display.update()
 
 def detect_asteroid(direction, asteroids, ship):
@@ -298,15 +326,13 @@ def detect_asteroid(direction, asteroids, ship):
     return 0
 
 def find_missing(lst): 
-    return [x for x in range(lst[0], lst[-1]+1)  
-                               if x not in lst] 
+    return [x for x in range(lst[0], lst[-1]+1) if x not in lst] 
 
 def main(genomes, config):
     nets = []
     ge = []
     ships = []
     tag = 0
-
 
     for _, g in genomes:
         net = neat.nn.FeedForwardNetwork.create(g, config)
@@ -316,9 +342,8 @@ def main(genomes, config):
         ge.append(g)
         tag += 1
     
-
     tags = []
-    asteroid_add = 5
+    asteroid_add = 10
     bullets = []
     asteroids = []
     run = True
@@ -335,15 +360,18 @@ def main(genomes, config):
 
         if len(asteroids) == 0:
             for ship in ships:
-                for add in range(0, asteroid_add):
+                added = 0
+                while added <= asteroid_add:
                     x = random.randint(0, 1000)
                     y = random.randint(0, 1000)
                     direction = random.randint(0, 360)
-                    if x >= ship.x - 100 and x <= ship.x + 100 and y >= ship.y - 100 and y <= ship.y + 100:
-                        pass    
+                    if x >= ship.x - 300 and x <= ship.x + 300 and y >= ship.y - 300 and y <= ship.y + 300:
+                        pass 
                     else:
                         asteroids.append(Asteroid(x, y, direction, 3, ship.ship_tag))
-                        asteroid_add += 1 
+                        added += 1
+                else:
+                    asteroid_add += 1 
 
         for asteroid in asteroids:
             tags.append(asteroid.ship_tag)
@@ -363,8 +391,12 @@ def main(genomes, config):
                     asteroids.append(Asteroid(x, y, direction, 3, missing))
                     asteroid_add += 1
 
+
+        bullet_tags = []
         for x, ship in enumerate(ships):
-            ge[x].fitness += 0.1
+            for bullet in bullets:
+                bullet_tags.append(bullet.ship_tag)
+            ge[x].fitness += .35
 
             output = nets[x].activate((detect_asteroid(0, asteroids, ship), detect_asteroid(45, asteroids, ship), detect_asteroid(90, asteroids, ship), detect_asteroid(135, asteroids, ship), detect_asteroid(180, asteroids, ship), detect_asteroid(225, asteroids, ship), detect_asteroid(270, asteroids, ship), detect_asteroid(315, asteroids, ship)))
             
@@ -377,27 +409,39 @@ def main(genomes, config):
             if output[2] >= 0.5:
                 ship.turn_right()
             if output[3] >= 0.5:
-                if len(bullets) <= 0:
+                if bullet_tags.count(ship.ship_tag) < 5 and ship.cooldown >= 10:
                     bullets.append(Bullet(ship, bullets, ship.ship_tag))
+                    ship.cooldown = 0
+                    
 
+        asteroids_tag = []
         for asteroid in asteroids:
             for x, ship in enumerate(ships):
-                if asteroid.detect_collision_ship(ship) and ship.ship_tag == asteroid.ship_tag:
-                    ge[x].fitness -= 1
+                if asteroid.detect_collision_ship(ship) and ship.ship_tag == asteroid.ship_tag: 
                     ships.pop(x)
                     nets.pop(x)
                     ge.pop(x)
+                    new_asteroids = asteroid.detect_parent_ship(ships, asteroids)
+                    asteroids = new_asteroids
 
+        ship_tags = []
         for x, asteroid in enumerate(asteroids):
-            if asteroid.detect_collision_bullet(bullets) and bullet.ship_tag == asteroid.ship_tag:
+            collision = asteroid.detect_collision_bullet(bullets)
+            if collision >= 0:
                 asteroid.split(asteroids)
                 asteroids.pop(x)
+                for ship in ships:
+                    if collision == ship.ship_tag:
+                        try:
+                            ge[collision].fitness += 3
+                        except:
+                            pass           
 
         if len(ships) == 0:
             break
         
         draw_window(WIN, ships, bullets, asteroids)
-        
+
 def run(config_path):
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
 
@@ -407,9 +451,13 @@ def run(config_path):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    winner = p.run(main,50)
+    winner = p.run(main,100000)
 
 if __name__ == "__main__":
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-feedforward.txt')
+
     run(config_path)
+
+
+
